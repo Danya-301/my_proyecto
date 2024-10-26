@@ -1,10 +1,10 @@
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template, redirect, url_for
 from keras.applications.imagenet_utils import preprocess_input
 from keras.models import load_model
 import numpy as np
 import cv2
 import os
-import gdown  # Biblioteca para descargar archivos de Google Drive
+import gdown
 
 # Inicializa la app Flask
 app = Flask(__name__)
@@ -26,64 +26,62 @@ names = ['Amazona Alinaranja', 'Amazona de San Vicente', 'Amazona Mercenaria', '
          'Periquito Australiano', 'Periquito Barrado', 'Tiluchí Colilargo', 'Tiluchí de Santander',
          'Tiluchi Lomirrufo']
 
-# Configuración de la carpeta de subida de imágenes
+# Ruta de carga del modelo desde Google Drive
+model_url = 'https://drive.google.com/uc?id=1WEZ60x_yPY-gPv8ugoq_qDLTSAD541zc'  # Reemplaza con el ID correcto
+model_path = 'modelo/model_VGG16_v4.keras'
+
+# Descarga el modelo si no existe
+if not os.path.exists(model_path):
+    gdown.download(model_url, model_path, quiet=False)
+
+# Carga el modelo
+model = load_model(model_path)
+
+# Ruta de subida de imágenes
 UPLOAD_FOLDER = 'static'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# Enlace al modelo en Google Drive (ID del archivo)
-MODEL_ID = "1WEZ60x_yPY-gPv8ugoq_qDLTSAD541zc"
-MODEL_PATH = "modelo_vgg16.keras"
-
-# Función para descargar el modelo desde Google Drive si no está disponible localmente
-def download_model():
-    if not os.path.exists(MODEL_PATH):
-        print("Descargando el modelo...")
-        url = f"https://drive.google.com/uc?id={MODEL_ID}"
-        gdown.download(url, MODEL_PATH, quiet=False)
-
-# Descargar el modelo
-download_model()
-model = load_model(MODEL_PATH)
 
 # Ruta principal
 @app.route("/", methods=["GET", "POST"])
 def home():
-    if request.method == "POST":
-        # Obtiene la imagen subida
-        image = request.files["image"]
-        image_path = os.path.join(app.config['UPLOAD_FOLDER'], 'uploaded_image.jpg')
-        image.save(image_path)
+    try:
+        if request.method == "POST":
+            # Obtiene la imagen subida
+            image = request.files["image"]
+            image_path = os.path.join(app.config['UPLOAD_FOLDER'], 'uploaded_image.jpg')
+            image.save(image_path)
 
-        # Procesa la imagen
-        img = cv2.imread(image_path)
-        img = cv2.resize(img, (224, 224))  # Ajusta al tamaño esperado por VGG16
-        img = np.expand_dims(img, axis=0)
-        img = preprocess_input(img)
+            # Procesa la imagen
+            img = cv2.imread(image_path)
+            img = cv2.resize(img, (224, 224))  # Ajusta al tamaño esperado por VGG16
+            img = np.expand_dims(img, axis=0)
+            img = preprocess_input(img)
 
-        try:
             # Realiza la predicción
             preds = model.predict(img)
             predicted_class_index = np.argmax(preds)
 
-            # Verifica si el índice está dentro del rango de nombres
+            # Asegúrate de que el índice esté dentro del rango
             if 0 <= predicted_class_index < len(names):
                 predicted_class_name = names[predicted_class_index]
                 confidence_percentage = preds[0][predicted_class_index] * 100
             else:
                 predicted_class_name = "Clase desconocida"
                 confidence_percentage = 0.0
-        except Exception as e:
+
+            # Renderiza el resultado
             return render_template("index.html", 
-                                   prediction="Error en la predicción", 
-                                   confidence="0.00")
+                                   prediction=predicted_class_name, 
+                                   confidence=f"{confidence_percentage:.2f}")
 
-        # Renderiza el resultado
+        # Si es una solicitud GET, renderiza la interfaz inicial
+        return render_template("index.html")
+
+    except Exception as e:
+        # Captura cualquier excepción y renderiza el error
         return render_template("index.html", 
-                               prediction=predicted_class_name, 
-                               confidence=f"{confidence_percentage:.2f}")
-
-    # Si es una solicitud GET, renderiza la interfaz inicial
-    return render_template("index.html")
+                               prediction="Error en la aplicación: " + str(e), 
+                               confidence="0.00")
 
 # Corre la aplicación
 if __name__ == "__main__":
