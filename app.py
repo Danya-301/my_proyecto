@@ -1,14 +1,12 @@
-from flask import Flask, request, render_template
-from keras.applications.imagenet_utils import preprocess_input
-from keras.models import load_model
-import numpy as np
-import cv2
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
 import os
+import cv2
+import numpy as np
+from keras.models import load_model
+from keras.applications.imagenet_utils import preprocess_input
 
-# Inicializa la app Flask
-app = Flask(__name__)
-
-# Lista de nombres de aves
+# Nombres de clases (solo mostrando algunos por espacio)
 names = [
     'Amazona Alinaranja', 'Amazona de San Vicente', 'Amazona Mercenaria', 'Amazona Real',
     'Aratinga de Pinceles', 'Aratinga de Wagler', 'Aratinga Ojiblanca', 'Aratinga Orejigualda',
@@ -27,60 +25,87 @@ names = [
     'Tiluchi Lomirrufo'
 ]
 
-# Carga el modelo
+# Inicializar Flask y configurar CORS
+app = Flask(__name__)
+CORS(app)
+
+# Configuración de rutas
+UPLOAD_FOLDER = './uploaded_images'
+app.config.from_mapping(
+    UPLOAD_FOLDER=UPLOAD_FOLDER,
+    ALLOWED_EXTENSIONS={'png', 'jpg', 'jpeg', 'gif'}
+)
+
+# Asegurar que el directorio de imágenes existe
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Cargar el modelo
 model_path = os.path.join(os.path.dirname(__file__), 'model_VGG16_v4.keras')
 model = load_model(model_path)
 
-# Ruta de subida de imágenes
-UPLOAD_FOLDER = 'static'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+def allowed_file(filename):
+    """Verificar si el archivo tiene una extensión permitida."""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-# Ruta principal
-@app.route("/", methods=["GET", "POST"])
-def home():
-    try:
-        if request.method == "POST":
-            # Verifica si se subió un archivo
-            if 'image' not in request.files:
-                return render_template("index.html", prediction="No se subió ninguna imagen.", confidence="0.00")
+@app.route('/api/', methods=['GET'])
+def get_example():
+    """Ejemplo de endpoint GET."""
+    return jsonify({"message": "Este es un ejemplo de respuesta GET"})
 
-            image = request.files["image"]
-            if image.filename == '':
-                return render_template("index.html", prediction="El archivo está vacío.", confidence="0.00")
+@app.route('/api/upload_image', methods=['POST'])
+def upload_image():
+    """Endpoint para subir y clasificar una imagen."""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part in the request"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    if allowed_file(file.filename):
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(filepath)
 
-            # Guarda la imagen
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], 'uploaded_image.jpg')
-            image.save(image_path)
+        try:
+            # Procesar imagen y predecir clase
+            image = cv2.resize(cv2.imread(filepath), (224, 224))
+            input_data = preprocess_input(np.expand_dims(image, axis=0))
+            preds = model.predict(input_data)
 
-            # Procesa la imagen
-            img = cv2.imread(image_path)
-            img = cv2.resize(img, (224, 224))
-            img = np.expand_dims(img, axis=0)
-            img = preprocess_input(img)
+            # Obtener predicción y confianza
+            class_index = np.argmax(preds)
+            class_name = names[class_index]
+            confidence = preds[0][class_index] * 100
 
-            # Realiza la predicción
-            preds = model.predict(img)
-            predicted_class_index = np.argmax(preds)
+            return jsonify({
+                "message": f'Clase predicha: {class_name}, Confianza: {confidence:.2f}%',
+                "file_path": filepath
+            }), 200
+        except Exception as e:
+            return jsonify({"error": f"Error al procesar la imagen: {str(e)}"}), 500
+    else:
+        return jsonify({"error": "Tipo de archivo no permitido"}), 400
 
-            # Verifica que el índice esté dentro del rango
-            if 0 <= predicted_class_index < len(names):
-                predicted_class_name = names[predicted_class_index]
-                confidence_percentage = preds[0][predicted_class_index] * 100
-            else:
-                predicted_class_name = "Clase desconocida"
-                confidence_percentage = 0.0
+@app.route('/api/post_example', methods=['POST'])
+def post_example():
+    """Ejemplo de endpoint POST."""
+    data = request.get_json()
+    return jsonify({
+        "message": "Datos recibidos correctamente",
+        "data": data
+    })
 
-            return render_template("index.html", 
-                                   prediction=predicted_class_name, 
-                                   confidence=f"{confidence_percentage:.2f}")
+@app.errorhandler(404)
+def not_found(error):
+    """Manejador de error 404."""
+    return jsonify({"error": "Recurso no encontrado"}), 404
 
-        return render_template("index.html")
+@app.route('/')
+def serve_interface():
+    """Servir archivo HTML desde la raíz."""
+    return send_from_directory('.', 'index2.html')
 
-    except Exception as e:
-        return render_template("index.html", 
-                               prediction=f"Error en la aplicación: {str(e)}", 
-                               confidence="0.00")
-
-# Corre la aplicación
-if __name__ == "__main__":
-    app.run(debug=True)
+if __name__ == '__main__':
+    # Usar el puerto asignado por el entorno si está disponible
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host='0.0.0.0', port=port)
