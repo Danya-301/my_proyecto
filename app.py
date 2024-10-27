@@ -28,7 +28,7 @@ names = ['Amazona Alinaranja', 'Amazona de San Vicente', 'Amazona Mercenaria', '
 
 # Ruta de carga del modelo desde Google Drive
 model_url = 'https://drive.google.com/uc?id=1WEZ60x_yPY-gPv8ugoq_qDLTSAD541zc'  # Reemplaza con el ID correcto
-model_path = 'modelo/model_VGG16_v4.keras'
+model_path = 'model_vgg16.keras'
 
 # Descarga el modelo si no existe
 if not os.path.exists(model_path):
